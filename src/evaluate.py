@@ -157,9 +157,9 @@ def save_results(
     full_retrain_time: float,
     sisa_unlearn_time: float,
     forget_accuracy: float | None = None,
-    save_path: str = "results.json",
+    save_path: str = "experiments/results.json",
 ) -> dict:
-    """측정 결과를 results.json으로 저장하고 논문 목표치와 비교 표를 출력.
+    """측정 결과를 experiments/results.json으로 저장하고 논문 목표치와 비교 표를 출력.
 
     Args:
         accuracy_before: 망각 전 테스트셋 정확도 (0~1).
@@ -167,29 +167,32 @@ def save_results(
         full_retrain_time: 전체 재학습 baseline 시간 (초).
         sisa_unlearn_time: SISA 망각 처리 시간 (초).
         forget_accuracy: forgotten 샘플 정확도 (0~1). None이면 생략.
-        save_path: 저장할 JSON 경로.
+        save_path: 저장할 JSON 경로 (기본값: experiments/results.json).
     """
     speedup = (
         full_retrain_time / sisa_unlearn_time if sisa_unlearn_time > 0 else float("inf")
     )
-    accuracy_drop_pp = (accuracy_before - accuracy_after) * 100
+    accuracy_drop = (accuracy_before - accuracy_after) * 100
 
     results = {
+        "speedup":          round(speedup, 2),
+        "accuracy_before":  round(accuracy_before * 100, 2),
+        "accuracy_after":   round(accuracy_after * 100, 2),
+        "accuracy_drop":    round(accuracy_drop, 2),
+        # 부가 정보
         "full_retrain_time_sec": round(full_retrain_time, 2),
         "sisa_unlearn_time_sec": round(sisa_unlearn_time, 2),
-        "speedup": round(speedup, 2),
-        "accuracy_before_pct": round(accuracy_before * 100, 2),
-        "accuracy_after_pct": round(accuracy_after * 100, 2),
-        "accuracy_drop_pp": round(accuracy_drop_pp, 2),
     }
     if forget_accuracy is not None:
-        results["forget_sample_accuracy_pct"] = round(forget_accuracy * 100, 2)
+        results["forget_accuracy"] = round(forget_accuracy * 100, 2)
 
-    Path(save_path).write_text(json.dumps(results, indent=2, ensure_ascii=False))
+    out_path = Path(save_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(results, indent=2, ensure_ascii=False))
     print(f"\nResults saved → {save_path}")
 
     _print_before_after(accuracy_before, accuracy_after)
-    _print_paper_comparison(speedup, accuracy_drop_pp)
+    _print_paper_comparison(speedup, accuracy_drop)
     return results
 
 

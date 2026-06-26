@@ -4,3 +4,6 @@ datasets>=2.18.0
 wandb>=0.16.0
 numpy>=1.26.0
 tqdm>=4.66.0
+streamlit>=1.35.0
+plotly
+pandas

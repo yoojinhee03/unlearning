@@ -67,3 +67,34 @@ def load_checkpoint(
     ckpt = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
     return ckpt
+
+
+# ── 간편 저장/로드 (메타데이터 없이 state dict만) ────────────────────────────
+
+def save_model(model: nn.Module, path: str | Path) -> None:
+    """모델 state dict만 저장."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), path)
+
+
+def load_model(
+    path: str | Path,
+    arch: str = "simple_cnn",
+    num_classes: int = 10,
+    device: torch.device | None = None,
+) -> nn.Module:
+    """저장된 가중치에서 모델을 복원해 반환.
+
+    save_model()로 저장한 bare state dict와
+    save_checkpoint()로 저장한 dict 형식 모두 처리한다.
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = get_model(arch=arch, num_classes=num_classes).to(device)
+    state = torch.load(path, map_location=device, weights_only=False)
+    if isinstance(state, dict) and "model_state_dict" in state:
+        model.load_state_dict(state["model_state_dict"])
+    else:
+        model.load_state_dict(state)
+    return model
