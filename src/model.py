@@ -1,24 +1,13 @@
 """모델 정의. SISA의 각 shard는 독립된 모델 인스턴스를 사용한다."""
 
+from pathlib import Path
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torchvision.models import resnet18, ResNet18_Weights
-
-
-def get_model(arch: str = "resnet18", num_classes: int = 10) -> nn.Module:
-    if arch == "resnet18":
-        model = resnet18(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
-    elif arch == "simple_cnn":
-        model = SimpleCNN(num_classes=num_classes)
-    else:
-        raise ValueError(f"Unknown architecture: {arch}")
-    return model
 
 
 class SimpleCNN(nn.Module):
-    """빠른 실험용 경량 CNN."""
+    """SVHN 분류용 3층 CNN (Conv2d 3층 + FC 2층)."""
 
     def __init__(self, num_classes: int = 10):
         super().__init__()
@@ -40,3 +29,41 @@ class SimpleCNN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.classifier(self.features(x))
+
+
+def get_model(arch: str = "simple_cnn", num_classes: int = 10) -> nn.Module:
+    if arch == "simple_cnn":
+        return SimpleCNN(num_classes=num_classes)
+    raise ValueError(f"Unknown architecture: {arch!r}")
+
+
+def save_checkpoint(
+    model: nn.Module,
+    path: str | Path,
+    shard_index: int,
+    slice_index: int,
+    epoch: int,
+) -> None:
+    """모델 가중치와 메타데이터를 함께 저장."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "shard_index": shard_index,
+            "slice_index": slice_index,
+            "epoch": epoch,
+        },
+        path,
+    )
+
+
+def load_checkpoint(
+    model: nn.Module,
+    path: str | Path,
+    device: torch.device,
+) -> dict:
+    """체크포인트를 로드해 model에 가중치를 적용하고 메타데이터를 반환."""
+    ckpt = torch.load(path, map_location=device, weights_only=False)
+    model.load_state_dict(ckpt["model_state_dict"])
+    return ckpt

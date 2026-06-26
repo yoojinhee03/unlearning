@@ -13,12 +13,18 @@ SISA Training 진입점.
 """
 
 import argparse
+import json
 import sys
+import time
 
 sys.path.insert(0, "src")
 
 from dataset import SISAConfig, SISADataset
-from evaluate import evaluate_forget_efficacy, evaluate_sisa
+from evaluate import (
+    evaluate_forget_efficacy,
+    evaluate_sisa,
+    save_results,
+)
 from train import train_all_shards
 from unlearn import process_forget_request
 
@@ -30,6 +36,12 @@ TRAIN_KWARGS = dict(
     batch_size=128,
     checkpoint_dir="checkpoints",
 )
+
+_TIMING_FILE = "results_timing.json"
+_RESULTS_FILE = "results.json"
+
+EVAL_KWARGS = {k: v for k, v in TRAIN_KWARGS.items() if k in ("arch", "num_classes", "checkpoint_dir")}
+EVAL_KWARGS_BATCH = {**EVAL_KWARGS, "batch_size": TRAIN_KWARGS["batch_size"]}
 
 
 def main():
@@ -51,38 +63,67 @@ def main():
     if args.mode == "train":
         print("Building shards...")
         sisa_dataset.build_shards()
+
         print("Starting SISA training...")
+        t0 = time.perf_counter()
         train_all_shards(
             sisa_dataset, config,
             **{**TRAIN_KWARGS, "use_wandb": args.use_wandb},
         )
-        evaluate_sisa(sisa_dataset, config, **{
-            k: v for k, v in TRAIN_KWARGS.items()
-            if k in ("arch", "num_classes", "batch_size", "checkpoint_dir")
-        })
+        full_retrain_time = time.perf_counter() - t0
+        print(f"\nTotal training time: {full_retrain_time:.1f}s")
+
+        result = evaluate_sisa(sisa_dataset, config, **EVAL_KWARGS_BATCH)
+
+        # 타이밍과 망각 전 정확도를 저장해 unlearn 모드에서 참조
+        json.dump(
+            {
+                "full_retrain_time_sec": round(full_retrain_time, 2),
+                "accuracy_before": result.get("accuracy", 0.0),
+            },
+            open(_TIMING_FILE, "w"),
+        )
 
     elif args.mode == "unlearn":
         if not args.forget_indices:
             parser.error("--forget-indices가 필요합니다.")
         if not sisa_dataset.load_shard_metadata():
             parser.error("shards/metadata.json 없음. 먼저 train을 실행하세요.")
+
+        # 망각 전 정확도/타이밍 로드
+        timing = {}
+        if (p := __import__("pathlib").Path(_TIMING_FILE)).exists():
+            timing = json.loads(p.read_text())
+        accuracy_before = timing.get("accuracy_before", 0.0)
+        full_retrain_time = timing.get("full_retrain_time_sec", 0.0)
+
+        t0 = time.perf_counter()
         process_forget_request(
             args.forget_indices, sisa_dataset, config, **TRAIN_KWARGS
         )
-        evaluate_forget_efficacy(
-            args.forget_indices, sisa_dataset, config, **{
-                k: v for k, v in TRAIN_KWARGS.items()
-                if k in ("arch", "num_classes", "checkpoint_dir")
-            }
+        sisa_unlearn_time = time.perf_counter() - t0
+        print(f"\nUnlearning time: {sisa_unlearn_time:.1f}s")
+
+        after_result = evaluate_sisa(sisa_dataset, config, **EVAL_KWARGS_BATCH)
+        accuracy_after = after_result.get("accuracy", 0.0)
+
+        forget_result = evaluate_forget_efficacy(
+            args.forget_indices, sisa_dataset, config, **EVAL_KWARGS
+        )
+
+        save_results(
+            accuracy_before=accuracy_before,
+            accuracy_after=accuracy_after,
+            full_retrain_time=full_retrain_time,
+            sisa_unlearn_time=sisa_unlearn_time,
+            forget_accuracy=forget_result.get("forget_accuracy"),
+            save_path=_RESULTS_FILE,
         )
 
     elif args.mode == "evaluate":
         if not sisa_dataset.load_shard_metadata():
             parser.error("shards/metadata.json 없음. 먼저 train을 실행하세요.")
-        evaluate_sisa(sisa_dataset, config, **{
-            k: v for k, v in TRAIN_KWARGS.items()
-            if k in ("arch", "num_classes", "batch_size", "checkpoint_dir")
-        })
+        evaluate_sisa(sisa_dataset, config, **EVAL_KWARGS_BATCH)
 
 
 if __name__ == "__main__":
