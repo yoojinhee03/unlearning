@@ -101,19 +101,21 @@ def generate_loss_curve(num_slices: int = 4) -> list[float]:
 def simulate_unlearn_time(
     affected_shards: int | list,
     baseline_time: float = 160.0,
+    num_shards: int = 5,
 ) -> dict:
     """SISA 망각 시간과 전체 재학습 시간 시뮬레이션.
 
     Args:
         affected_shards: 영향받은 shard 수 또는 shard 인덱스 리스트.
         baseline_time:   전체 재학습 baseline 시간 (초).
+        num_shards:      시스템 전체 shard 수 (speedup 분모).
 
     Returns:
         {"sisa_time": float, "baseline_time": float, "speedup": float}
     """
     n = affected_shards if isinstance(affected_shards, int) else len(affected_shards)
     # SISA 시간 = baseline / 총 shard 수 × 영향받은 shard 수 (+ 약간의 오버헤드)
-    total_shards = max(n, 5)
+    total_shards = max(num_shards, 1)
     sisa_time = round(baseline_time * (n / total_shards) * 1.05, 2)
     speedup   = round(baseline_time / sisa_time, 2) if sisa_time > 0 else float("inf")
 

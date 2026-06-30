@@ -7,6 +7,7 @@ point_to_shard.json과 metadata.json을 읽어
 
 import json
 import math
+import shutil
 import time
 from pathlib import Path
 
@@ -41,6 +42,8 @@ def _first_slice_with_data(
     cumulative_slices: list[list[int]],
 ) -> int:
     """forget 샘플이 처음 등장하는 slice 번호 반환 (누적 slice 기준)."""
+    if not cumulative_slices:
+        return 0
     for slice_idx, indices in enumerate(cumulative_slices):
         if forget_set & set(indices):
             return slice_idx
@@ -118,6 +121,10 @@ def unlearn_request(
     criterion = nn.CrossEntropyLoss()
     start_slices: dict[str, int] = {}
 
+    # metadata 갱신용 복사본
+    updated_shard_indices = list(shard_indices)
+    updated_slice_indices = list(slice_indices)
+
     for shard_idx in sorted(affected):
         # 2. forget 샘플이 처음 등장하는 slice 탐색
         start_slice = _first_slice_with_data(forget_set, slice_indices[shard_idx])
@@ -125,11 +132,30 @@ def unlearn_request(
 
         # forget 샘플 제거 후 누적 slice 재구성
         updated = [i for i in shard_indices[shard_idx] if i not in forget_set]
-        updated_slices = _make_cumulative_slices(updated, num_slices)
+        new_slices = _make_cumulative_slices(updated, num_slices)
+
+        # metadata 갱신본에 반영
+        updated_shard_indices[shard_idx] = updated
+        updated_slice_indices[shard_idx] = new_slices
+
+        ckpt_dir = Path(checkpoint_dir)
+
+        # shard가 완전히 비었으면 기존 체크포인트를 새 빈 모델로 덮어씀
+        if not new_slices:
+            print(f"\n=== Shard {shard_idx}: 모든 샘플 제거됨 — 빈 모델로 초기화 ===")
+            fresh_model = get_model(arch=arch, num_classes=num_classes).to(device)
+            for sl_idx in range(start_slice, num_slices):
+                save_checkpoint(
+                    fresh_model,
+                    ckpt_dir / f"shard{shard_idx}_slice{sl_idx}.pt",
+                    shard_index=shard_idx,
+                    slice_index=sl_idx,
+                    epoch=0,
+                )
+            continue
 
         # 직전 체크포인트에서 모델 초기화
-        model   = get_model(arch=arch, num_classes=num_classes).to(device)
-        ckpt_dir = Path(checkpoint_dir)
+        model = get_model(arch=arch, num_classes=num_classes).to(device)
         if start_slice > 0:
             prev_ckpt = ckpt_dir / f"shard{shard_idx}_slice{start_slice - 1}.pt"
             if prev_ckpt.exists():
@@ -139,8 +165,8 @@ def unlearn_request(
         print(f"\n=== Retraining Shard {shard_idx} from Slice {start_slice} ===")
 
         # 3. start_slice부터 마지막까지 재학습
-        for slice_idx in range(start_slice, len(updated_slices)):
-            slice_ds = SVHNDataset(hf_train, updated_slices[slice_idx])
+        for slice_idx in range(start_slice, len(new_slices)):
+            slice_ds = SVHNDataset(hf_train, new_slices[slice_idx])
             loader   = get_dataloader(slice_ds, batch_size=batch_size, shuffle=True)
 
             optimizer = torch.optim.SGD(
@@ -162,6 +188,23 @@ def unlearn_request(
                 slice_index=slice_idx,
                 epoch=epochs_per_slice - 1,
             )
+
+        # 재학습된 slice 수가 num_slices보다 적으면 마지막 체크포인트를
+        # evaluate_sisa가 항상 찾는 위치(slice{num_slices-1})에 복사해 stale 파일을 덮어씀
+        if len(new_slices) < num_slices:
+            last_written = ckpt_dir / f"shard{shard_idx}_slice{len(new_slices) - 1}.pt"
+            stale_final  = ckpt_dir / f"shard{shard_idx}_slice{num_slices - 1}.pt"
+            shutil.copy2(last_written, stale_final)
+
+    # metadata.json 갱신 — 다음 unlearn 호출이 최신 인덱스를 읽도록 보장
+    meta_updated = {
+        "num_shards":    meta["num_shards"],
+        "num_slices":    meta["num_slices"],
+        "shard_indices": updated_shard_indices,
+        "slice_indices": updated_slice_indices,
+    }
+    with open(Path(shards_dir) / "metadata.json", "w") as f:
+        json.dump(meta_updated, f)
 
     # 4. 소요 시간 측정
     unlearn_time = time.perf_counter() - t_start
@@ -226,6 +269,9 @@ def process_forget_request(
     """SISADataset 기반 기존 API. unlearn_request()를 내부적으로 사용."""
     result = unlearn_request(
         forget_indices,
+        shards_dir=train_kwargs.get(
+            "shards_dir", getattr(config, "shards_dir", "shards")
+        ),
         checkpoint_dir=train_kwargs.get("checkpoint_dir", "checkpoints"),
         arch=train_kwargs.get("arch", "simple_cnn"),
         num_classes=train_kwargs.get("num_classes", 10),

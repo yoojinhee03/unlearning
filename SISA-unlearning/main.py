@@ -76,13 +76,14 @@ def main():
         result = evaluate_sisa(sisa_dataset, config, **EVAL_KWARGS_BATCH)
 
         # 타이밍과 망각 전 정확도를 저장해 unlearn 모드에서 참조
-        json.dump(
-            {
-                "full_retrain_time_sec": round(full_retrain_time, 2),
-                "accuracy_before": result.get("accuracy", 0.0),
-            },
-            open(_TIMING_FILE, "w"),
-        )
+        with open(_TIMING_FILE, "w") as f:
+            json.dump(
+                {
+                    "full_retrain_time_sec": round(full_retrain_time, 2),
+                    "accuracy_before": result.get("accuracy", 0.0),
+                },
+                f,
+            )
 
     elif args.mode == "unlearn":
         if not args.forget_indices:

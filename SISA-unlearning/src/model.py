@@ -64,7 +64,7 @@ def load_checkpoint(
     device: torch.device,
 ) -> dict:
     """체크포인트를 로드해 model에 가중치를 적용하고 메타데이터를 반환."""
-    ckpt = torch.load(path, map_location=device, weights_only=False)
+    ckpt = torch.load(path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"])
     return ckpt
 
@@ -92,7 +92,7 @@ def load_model(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = get_model(arch=arch, num_classes=num_classes).to(device)
-    state = torch.load(path, map_location=device, weights_only=False)
+    state = torch.load(path, map_location=device, weights_only=True)
     if isinstance(state, dict) and "model_state_dict" in state:
         model.load_state_dict(state["model_state_dict"])
     else:

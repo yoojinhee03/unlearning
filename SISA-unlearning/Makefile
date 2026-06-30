@@ -4,10 +4,10 @@ install:
 	uv pip install -r requirements.txt
 
 run:
-	uv run streamlit run dashboard/app.py
+	uv run python -m streamlit run dashboard/app.py
 
 demo:
-	DEMO_MODE=true uv run streamlit run dashboard/app.py
+	DEMO_MODE=true uv run python -m streamlit run dashboard/app.py
 
 dashboard: run
 

@@ -52,7 +52,7 @@ def get_training_status(
             path = ckpt_dir / f"shard{s}_slice{sl}.pt"
             if path.exists():
                 import torch
-                ckpt = torch.load(path, map_location="cpu", weights_only=False)
+                ckpt = torch.load(path, map_location="cpu", weights_only=True)
                 slices.append({
                     "slice":    sl,
                     "accuracy": float(ckpt.get("val_accuracy", 0.0)),
@@ -90,7 +90,7 @@ def run_unlearn(
     if demo_mode:
         # 영향받을 shard 수를 인덱스 분포로 추정
         n_affected = max(1, len(set(i % num_shards for i in data_indices)))
-        return _mock.simulate_unlearn_time(n_affected)
+        return _mock.simulate_unlearn_time(n_affected, num_shards=num_shards)
 
     from unlearn import unlearn_request
     return unlearn_request(
@@ -113,7 +113,7 @@ def get_results(
         mock 결과 (demo_mode=True).
     """
     if demo_mode:
-        sim = _mock.simulate_unlearn_time(affected_shards=1)
+        sim = _mock.simulate_unlearn_time(affected_shards=1, num_shards=5)
         paper = _mock.generate_paper_results()["svhn"]
         return {
             "speedup":               sim["speedup"],
@@ -149,7 +149,7 @@ def get_point_to_shard_map(
     """
     if demo_mode:
         shard_size = dataset_size // num_shards
-        return {i: i // shard_size for i in range(dataset_size)}
+        return {i: min(i // shard_size, num_shards - 1) for i in range(dataset_size)}
 
     path = _ROOT / map_path
     if not path.exists():
@@ -197,8 +197,7 @@ def run_training(num_shards: int, num_slices: int,
     if use_wandb:
         cmd.append("--use-wandb")
     return subprocess.Popen(cmd, cwd=str(_ROOT),
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True)
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def run_unlearning(forget_indices: list[int], num_shards: int,

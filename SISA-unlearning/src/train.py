@@ -38,6 +38,8 @@ def train_one_epoch(
         total_loss += loss.item() * inputs.size(0)
         correct += outputs.argmax(1).eq(targets).sum().item()
         total += inputs.size(0)
+    if total == 0:
+        return 0.0, 0.0
     return total_loss / total, correct / total
 
 
